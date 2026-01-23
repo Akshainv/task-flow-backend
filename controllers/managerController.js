@@ -15,6 +15,7 @@ import Manager from '../models/Manager.js';
 export const createManager = async (req, res) => {
     try {
         const { name, email, password, company, contactNumber } = req.body;
+        console.log('BODY:', req.body);
 
         // Validate required fields
         if (!name || !email || !password || !company || !contactNumber) {
@@ -23,6 +24,8 @@ export const createManager = async (req, res) => {
                 message: 'Please provide all required fields',
             });
         }
+
+        
 
         // Check if manager already exists
         const existingManager = await Manager.findOne({ email: email.toLowerCase().trim() });

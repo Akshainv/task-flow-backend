@@ -13,7 +13,7 @@ import {
     loginEmployee,
     getEmployeeProfile,
 } from '../controllers/employeeController.js';
-import { protect, protectEmployee } from '../middleware/authMiddleware.js';
+import { protect, protectEmployee, protectAny } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -41,9 +41,9 @@ router.post('/', protect, createEmployee);
 /**
  * @route   GET /api/employees
  * @desc    Get all employees
- * @access  Private (Admin only)
+ * @access  Private (Admin and Manager)
  */
-router.get('/', protect, getAllEmployees);
+router.get('/', protectAny, getAllEmployees);
 
 /**
  * @route   GET /api/employees/:id
