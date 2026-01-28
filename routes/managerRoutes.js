@@ -12,6 +12,7 @@ import {
     deleteManager,
     loginManager,
     getManagerProfile,
+    assignEmployees,
 } from '../controllers/managerController.js';
 import { protect, protectManager } from '../middleware/authMiddleware.js';
 
@@ -65,5 +66,12 @@ router.put('/:id', protect, updateManager);
  * @access  Private (Admin only)
  */
 router.delete('/:id', protect, deleteManager);
+
+/**
+ * @route   PUT /api/managers/:id/assign
+ * @desc    Assign employees to a manager
+ * @access  Private (Admin only)
+ */
+router.put('/:id/assign', protect, assignEmployees);
 
 export default router;

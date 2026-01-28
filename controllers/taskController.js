@@ -4,10 +4,60 @@
  */
 
 import mongoose from 'mongoose';
+import path from 'path';
+import fs from 'fs';
+import multer from 'multer';
 import Task from '../models/Task.js';
 import Project from '../models/Project.js';
 import Employee from '../models/Employee.js';
+import Manager from '../models/Manager.js';
 import { createNotification } from './notificationController.js';
+import { getPaginationParams, getPaginationMeta } from '../utils/pagination.js';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Configure storage for task progress photos
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const dir = 'uploads/tasks';
+        console.log(`[Multer] Saving file to: ${dir}`);
+        if (!fs.existsSync(dir)) {
+            console.log(`[Multer] Creating directory: ${dir}`);
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        cb(null, dir);
+    },
+    filename: (req, file, cb) => {
+        const uniqueName = `task-${req.params.id}-${Date.now()}${path.extname(file.originalname)}`;
+        console.log(`[Multer] Generated filename: ${uniqueName}`);
+        cb(null, uniqueName);
+    }
+});
+
+// Export the raw Multer instance - following Attendance pattern
+export const uploadTaskPhotos = multer({
+    storage: storage,
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+    fileFilter: (req, file, cb) => {
+        console.log(`[Multer Filter] Checking file:`, file.originalname, file.mimetype);
+        const imageTypes = /jpeg|jpg|png|webp/;
+        const audioTypes = /webm|wav|mpeg|mp3|ogg/;
+
+        const isImage = imageTypes.test(file.mimetype) || imageTypes.test(path.extname(file.originalname).toLowerCase());
+        const isAudio = audioTypes.test(file.mimetype) || audioTypes.test(path.extname(file.originalname).toLowerCase());
+
+        console.log(`[Multer Filter] Is Image: ${isImage}, Is Audio: ${isAudio}`);
+
+        if (isImage || isAudio) {
+            console.log(`[Multer Filter] File accepted: ${file.originalname}`);
+            return cb(null, true);
+        }
+        console.log(`[Multer Filter] File rejected: ${file.originalname} - invalid type`);
+        cb(new Error('Only images and audio files are allowed!'));
+    }
+});
 
 /**
  * @desc    Create new task
@@ -112,6 +162,7 @@ export const createTask = async (req, res) => {
         await task.populate('createdBy', 'name email');
 
         // Create notification for assigned employee
+        console.log(`Creating notification for task assignment: Employee ${assignedEmployee}`);
         await createNotification({
             userId: assignedEmployee,
             userType: 'Employee',
@@ -444,20 +495,52 @@ export const deleteTask = async (req, res) => {
 /**
  * @desc    Get all tasks for employee (across all projects)
  * @route   GET /api/tasks/my-tasks
- * @access  Private (Employee only)
+ * @route   GET /api/tasks/employee/:employeeId
+ * @access  Private (Employee only or Admin/Manager)
  */
 export const getMyTasks = async (req, res) => {
     try {
-        const tasks = await Task.find({ assignedEmployee: req.user._id })
+        const { page, limit, skip } = getPaginationParams(req.query);
+        let targetEmployeeId = req.params.employeeId || req.user._id;
+
+        // Validation: Verify targetEmployeeId is a valid ObjectId
+        if (!mongoose.Types.ObjectId.isValid(targetEmployeeId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid employee ID format',
+            });
+        }
+
+        // Authorization checks
+        if (req.user.role === 'employee') {
+            // Employees can only view their own tasks
+            if (targetEmployeeId.toString() !== req.user._id.toString()) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access denied. You can only view your own tasks.',
+                });
+            }
+        } else if (req.user.role === 'manager') {
+            // Managers can view any employee tasks but usually those in their team
+            // (Optional: Add team membership check here if strictness is required)
+        }
+        // Admin has full access
+
+        const query = { assignedEmployee: targetEmployeeId };
+        const totalCount = await Task.countDocuments(query);
+        const tasks = await Task.find(query)
             .populate('assignedEmployee', 'name email designation')
             .populate('project', 'projectName')
             .populate('createdBy', 'name email')
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
 
         res.status(200).json({
             success: true,
             count: tasks.length,
             tasks,
+            pagination: getPaginationMeta(page, limit, totalCount),
         });
     } catch (error) {
         console.error('Get My Tasks Error:', error);
@@ -465,5 +548,188 @@ export const getMyTasks = async (req, res) => {
             success: false,
             message: 'Server error. Please try again later.',
         });
+    }
+};
+
+/**
+ * @desc    Get all tasks (Admin - all, Manager - team tasks, Employee - own tasks)
+ * @route   GET /api/tasks
+ * @access  Private
+ */
+export const getTasks = async (req, res) => {
+    try {
+        const { page, limit, skip } = getPaginationParams(req.query);
+        let query = {};
+
+        if (req.user.role === 'manager') {
+            const manager = await Manager.findById(req.user._id);
+            const teamMemberIds = manager?.employees || [];
+            // Show tasks assigned to team members OR tasks created by the manager
+            query = {
+                $or: [
+                    { createdBy: req.user._id },
+                    { assignedEmployee: { $in: teamMemberIds } }
+                ]
+            };
+        } else if (req.user.role === 'employee') {
+            query = { assignedEmployee: req.user._id };
+        }
+        // Admin sees all (empty query)
+
+        const totalCount = await Task.countDocuments(query);
+        const tasks = await Task.find(query)
+            .populate('assignedEmployee', 'name email designation')
+            .populate('project', 'projectName')
+            .populate('createdBy', 'name email')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        res.status(200).json({
+            success: true,
+            count: tasks.length,
+            tasks,
+            pagination: getPaginationMeta(page, limit, totalCount),
+        });
+    } catch (error) {
+        console.error('Get Tasks Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error. Please try again later.',
+        });
+    }
+};
+
+/**
+ * @desc    Submit task progress update (Employee)
+ * @route   POST /api/tasks/:id/progress
+ * @access  Private (Employee)
+ */
+export const updateTaskProgress = async (req, res) => {
+    try {
+        const task = await Task.findById(req.params.id);
+        if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
+
+        if (task.assignedEmployee.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ success: false, message: 'Not authorized' });
+        }
+
+        console.log(`[TaskUpdate] Request received for task ${req.params.id}`);
+        console.log(`[TaskUpdate] Files:`, req.files ? req.files.length : 0);
+
+        if (req.files && Array.isArray(req.files)) {
+            req.files.forEach((f, i) => {
+                console.log(`[TaskUpdate] File ${i}: name=${f.originalname}, size=${f.size}`);
+            });
+        }
+
+        console.log(`[TaskUpdate] Notes:`, req.body.notes);
+
+        const photos = [];
+        let voiceNote = null;
+
+        if (req.files && Array.isArray(req.files)) {
+            req.files.forEach(file => {
+                const filePath = `/uploads/tasks/${file.filename}`;
+                if (file.mimetype.startsWith('image/')) {
+                    photos.push(filePath);
+                } else if (file.mimetype.startsWith('audio/')) {
+                    voiceNote = filePath;
+                }
+            });
+        }
+
+        const { notes } = req.body;
+
+        task.progressUpdates.push({
+            photos,
+            voiceNote,
+            notes,
+            submittedAt: new Date(),
+            approvalStatus: 'pending'
+        });
+        task.status = 'In Progress';
+        task.pendingApproval = true;
+
+        await task.save();
+
+        console.log('[TaskUpdate] Task saved successfully with progress update');
+
+        // Notify Manager
+        try {
+            await createNotification({
+                userId: task.createdBy,
+                userType: 'Manager',
+                title: 'Task Approval Requested',
+                message: `Employee ${req.user.name} has submitted progress for task: ${task.taskName}`,
+                type: 'task_updated', // Enum-safe value
+                relatedId: task._id
+            });
+            console.log('[TaskUpdate] Notification sent to manager');
+        } catch (notifErr) {
+            console.error('[TaskUpdate] Notification failed (non-fatal):', notifErr.message);
+        }
+
+        res.status(200).json({ success: true, message: 'Progress submitted for approval', task });
+    } catch (error) {
+        console.error('Update Progress Error:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
+/**
+ * @desc    Approve or Reject task progress (Manager)
+ * @route   PUT /api/tasks/:id/approve
+ * @access  Private (Manager)
+ */
+export const approveTaskProgress = async (req, res) => {
+    try {
+        const { status, approvalNote } = req.body; // status: 'approved' or 'rejected'
+        const task = await Task.findById(req.params.id);
+        if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
+
+        if (task.createdBy.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ success: false, message: 'Not authorized' });
+        }
+
+        const latestUpdate = task.progressUpdates[task.progressUpdates.length - 1];
+        if (!latestUpdate) return res.status(400).json({ success: false, message: 'No updates to approve' });
+
+        latestUpdate.approvalStatus = status;
+        latestUpdate.approvalNote = approvalNote;
+        latestUpdate.approvedAt = new Date();
+
+        if (status === 'approved') {
+            task.status = 'Completed';
+            task.pendingApproval = false;
+        } else {
+            task.status = 'In Progress';
+            task.pendingApproval = false;
+        }
+
+        await task.save();
+
+        // Calculate Project Progress
+        const projectTasks = await Task.find({ project: task.project });
+        const completedTasks = projectTasks.filter(t => t.status === 'Completed').length;
+        const totalTasks = projectTasks.length;
+        const progressPercentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+        await Project.findByIdAndUpdate(task.project, { progress: progressPercentage });
+
+        // Notify Employee
+        await createNotification({
+            userId: task.assignedEmployee,
+            userType: 'Employee',
+            title: `Task ${status === 'approved' ? 'Approved' : 'Rejected'}`,
+            message: `Your update for task "${task.taskName}" has been ${status}. ${approvalNote || ''}`,
+            type: 'task',
+            relatedId: task._id
+        });
+
+        res.status(200).json({ success: true, message: `Task ${status} successfully`, task });
+    } catch (error) {
+        console.error('Approve Error:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };

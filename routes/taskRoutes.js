@@ -11,10 +11,44 @@ import {
     updateTask,
     deleteTask,
     getMyTasks,
+    getTasks,
+    updateTaskProgress,
+    approveTaskProgress,
+    uploadTaskPhotos,
 } from '../controllers/taskController.js';
 import { protectManager, protectEmployee, protectManagerOrEmployee, protectAny } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
+
+/**
+ * @route   POST /api/tasks/:id/progress
+ * @desc    Submit task progress update (Photos & Notes)
+ * @access  Private (Employee only)
+ */
+router.post('/:id/progress',
+    protectEmployee,
+    (req, res, next) => {
+        console.log(`\n[SNIFFER] Request to ${req.originalUrl}`);
+        console.log(`[SNIFFER] Content-Type: ${req.headers['content-type']}`);
+        next();
+    },
+    uploadTaskPhotos.array('photos', 5),
+    updateTaskProgress
+);
+
+/**
+ * @route   PUT /api/tasks/:id/approve
+ * @desc    Approve or Reject task progress update
+ * @access  Private (Manager only)
+ */
+router.put('/:id/approve', protectManager, approveTaskProgress);
+
+/**
+ * @route   GET /api/tasks
+ * @desc    Get all tasks (Role-based)
+ * @access  Private
+ */
+router.get('/', protectAny, getTasks);
 
 /**
  * @route   GET /api/tasks/my-tasks
@@ -22,6 +56,13 @@ const router = express.Router();
  * @access  Private (Employee only)
  */
 router.get('/my-tasks', protectEmployee, getMyTasks);
+
+/**
+ * @route   GET /api/tasks/employee/:employeeId
+ * @desc    Get all tasks for a specific employee
+ * @access  Private (Admin/Manager or matching Employee)
+ */
+router.get('/employee/:employeeId', protectAny, getMyTasks); // We can reuse getMyTasks if we modify it to handle params
 
 /**
  * @route   POST /api/tasks/project/:projectId

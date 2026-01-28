@@ -6,6 +6,8 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import Employee from '../models/Employee.js';
+import Manager from '../models/Manager.js';
+import { getPaginationParams, getPaginationMeta } from '../utils/pagination.js';
 
 /**
  * @desc    Create new employee
@@ -39,7 +41,7 @@ export const createEmployee = async (req, res) => {
             email: email.toLowerCase().trim(),
             password,
             contactNumber: contactNumber.trim(),
-            designation: designation.trim(),
+            designation: designation.trim()
         });
 
         res.status(201).json({
@@ -51,7 +53,7 @@ export const createEmployee = async (req, res) => {
                 email: employee.email,
                 contactNumber: employee.contactNumber,
                 designation: employee.designation,
-                role: employee.role,
+                role: employee.role
             },
         });
     } catch (error) {
@@ -66,16 +68,40 @@ export const createEmployee = async (req, res) => {
 /**
  * @desc    Get all employees
  * @route   GET /api/employees
- * @access  Private (Admin only)
+ * @access  Private (Admin and Manager)
  */
 export const getAllEmployees = async (req, res) => {
     try {
-        const employees = await Employee.find().select('-password').sort({ createdAt: -1 });
+        const { page, limit, skip } = getPaginationParams(req.query);
+        let query = {};
+
+        // If requester is a manager, only show employees assigned to them
+        if (req.user && req.user.role === 'manager') {
+            const manager = await Manager.findById(req.user._id);
+            if (manager && manager.employees && manager.employees.length > 0) {
+                query._id = { $in: manager.employees };
+            } else {
+                return res.status(200).json({
+                    success: true,
+                    count: 0,
+                    employees: [],
+                    pagination: getPaginationMeta(page, limit, 0),
+                });
+            }
+        }
+
+        const totalCount = await Employee.countDocuments(query);
+        const employees = await Employee.find(query)
+            .select('-password')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
 
         res.status(200).json({
             success: true,
             count: employees.length,
             employees,
+            pagination: getPaginationMeta(page, limit, totalCount),
         });
     } catch (error) {
         console.error('Get Employees Error:', error);
@@ -162,7 +188,7 @@ export const updateEmployee = async (req, res) => {
                 email: employee.email,
                 contactNumber: employee.contactNumber,
                 designation: employee.designation,
-                role: employee.role,
+                role: employee.role
             },
         });
     } catch (error) {

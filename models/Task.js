@@ -39,6 +39,25 @@ const taskSchema = new mongoose.Schema(
             ref: 'Manager',
             required: [true, 'Creator (Manager) is required'],
         },
+        // Progress updates submitted by employee (Photos & Text only)
+        progressUpdates: [{
+            photos: [String],
+            voiceNote: String,
+            notes: String,
+            submittedAt: { type: Date, default: Date.now },
+            approvalStatus: {
+                type: String,
+                enum: ['pending', 'approved', 'rejected'],
+                default: 'pending'
+            },
+            approvalNote: String,
+            approvedAt: Date
+        }],
+        // Latest approval request status
+        pendingApproval: {
+            type: Boolean,
+            default: false
+        }
     },
     {
         timestamps: true,

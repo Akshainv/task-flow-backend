@@ -6,6 +6,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import Manager from '../models/Manager.js';
+import { getPaginationParams, getPaginationMeta } from '../utils/pagination.js';
 
 /**
  * @desc    Create new manager
@@ -25,7 +26,7 @@ export const createManager = async (req, res) => {
             });
         }
 
-        
+
 
         // Check if manager already exists
         const existingManager = await Manager.findOne({ email: email.toLowerCase().trim() });
@@ -73,12 +74,20 @@ export const createManager = async (req, res) => {
  */
 export const getAllManagers = async (req, res) => {
     try {
-        const managers = await Manager.find().select('-password').sort({ createdAt: -1 });
+        const { page, limit, skip } = getPaginationParams(req.query);
+
+        const totalCount = await Manager.countDocuments();
+        const managers = await Manager.find()
+            .select('-password')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
 
         res.status(200).json({
             success: true,
             count: managers.length,
             managers,
+            pagination: getPaginationMeta(page, limit, totalCount),
         });
     } catch (error) {
         console.error('Get Managers Error:', error);
@@ -201,6 +210,48 @@ export const deleteManager = async (req, res) => {
         });
     } catch (error) {
         console.error('Delete Manager Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error. Please try again later.',
+        });
+    }
+};
+
+/**
+ * @desc    Assign employees to a manager
+ * @route   PUT /api/managers/:id/assign
+ * @access  Private (Admin only)
+ */
+export const assignEmployees = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { employeeIds } = req.body;
+
+        if (!Array.isArray(employeeIds)) {
+            return res.status(400).json({
+                success: false,
+                message: 'employeeIds must be an array',
+            });
+        }
+
+        const manager = await Manager.findById(id);
+        if (!manager) {
+            return res.status(404).json({
+                success: false,
+                message: 'Manager not found',
+            });
+        }
+
+        manager.employees = employeeIds;
+        await manager.save();
+
+        res.status(200).json({
+            success: true,
+            message: 'Employees assigned successfully',
+            manager,
+        });
+    } catch (error) {
+        console.error('Assign Employees Error:', error);
         res.status(500).json({
             success: false,
             message: 'Server error. Please try again later.',

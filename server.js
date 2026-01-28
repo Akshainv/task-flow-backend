@@ -17,6 +17,14 @@ import authRoutes from './routes/authRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import serviceRequestRoutes from './routes/serviceRequestRoutes.js';
+import teamRoutes from './routes/teamRoutes.js';
+import attendanceRoutes from './routes/attendanceRoutes.js';
+import employeeServiceRequestRoutes from './routes/employeeServiceRequestRoutes.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Load environment variables
 dotenv.config();
@@ -45,6 +53,9 @@ app.use(express.json());
 
 // Parse URL-encoded request bodies
 app.use(express.urlencoded({ extended: true }));
+
+// Serve static files from uploads directory
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ===== ROUTES =====
 
@@ -78,6 +89,9 @@ app.use('/api/managers', managerRoutes);
 // Employee Routes
 app.use('/api/employees', employeeRoutes);
 
+// Attendance Routes (Moved Up for Priority)
+app.use('/api/attendance', attendanceRoutes);
+
 // Project Routes
 app.use('/api/projects', projectRoutes);
 
@@ -92,6 +106,12 @@ app.use('/api/dashboard', dashboardRoutes);
 
 // Service Request Routes
 app.use('/api/service-requests', serviceRequestRoutes);
+
+// Employee Service Request Routes
+app.use('/api/employee-service-requests', employeeServiceRequestRoutes);
+
+// Team Routes
+app.use('/api/teams', teamRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

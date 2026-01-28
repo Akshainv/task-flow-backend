@@ -38,6 +38,10 @@ const employeeSchema = new mongoose.Schema(
             type: String,
             default: 'employee',
         },
+        fcmToken: {
+            type: String,
+            default: '',
+        },
     },
     {
         timestamps: true,

@@ -22,7 +22,7 @@ export const createServiceRequest = async (req, res) => {
             });
         }
 
-        const { serviceType, description, priority } = req.body;
+        const { serviceType, description } = req.body;
 
         // Validate required fields
         if (!serviceType || !serviceType.trim()) {
@@ -39,28 +39,11 @@ export const createServiceRequest = async (req, res) => {
             });
         }
 
-        if (!priority) {
-            return res.status(400).json({
-                success: false,
-                message: 'Priority is required',
-            });
-        }
-
-        // Validate priority value
-        if (!['Low', 'Medium', 'High'].includes(priority)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid priority. Must be Low, Medium, or High.',
-            });
-        }
-
         // Create service request
         const serviceRequest = await ServiceRequest.create({
             managerId: req.user._id,
-            managerName: req.user.name,
             serviceType: serviceType.trim(),
             description: description.trim(),
-            priority,
         });
 
         res.status(201).json({
@@ -95,6 +78,7 @@ export const getMyServiceRequests = async (req, res) => {
         }
 
         const serviceRequests = await ServiceRequest.find({ managerId: req.user._id })
+            .populate('managerId', 'name email')
             .sort({ createdAt: -1 });
 
         res.status(200).json({

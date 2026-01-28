@@ -8,6 +8,7 @@ import Project from '../models/Project.js';
 import Employee from '../models/Employee.js';
 import Task from '../models/Task.js';
 import { createNotification } from './notificationController.js';
+import { getPaginationParams, getPaginationMeta } from '../utils/pagination.js';
 
 /**
  * @desc    Create new project
@@ -81,7 +82,8 @@ export const createProject = async (req, res) => {
 
         // Create notifications for assigned employees
         if (assignedEmployees && assignedEmployees.length > 0) {
-            assignedEmployees.forEach(async (employeeId) => {
+            for (const employeeId of assignedEmployees) {
+                console.log(`Creating notification for project assignment: Employee ${employeeId}`);
                 await createNotification({
                     userId: employeeId,
                     userType: 'Employee',
@@ -90,7 +92,7 @@ export const createProject = async (req, res) => {
                     type: 'project_created',
                     relatedId: project._id
                 });
-            });
+            }
         }
 
         res.status(201).json({
@@ -116,27 +118,16 @@ export const createProject = async (req, res) => {
  */
 export const getAllProjects = async (req, res) => {
     try {
-        let projects;
+        const { page, limit, skip } = getPaginationParams(req.query);
+        let query = {};
 
         // Check role from the authenticated user
         if (req.user.role === 'admin') {
-            // Admin can see all projects
-            projects = await Project.find()
-                .populate('assignedEmployees', 'name email designation')
-                .populate('createdBy', 'name email')
-                .sort({ createdAt: -1 });
+            // Admin can see all projects (empty query)
         } else if (req.user.role === 'manager') {
-            // Manager can only see their own projects
-            projects = await Project.find({ createdBy: req.user._id })
-                .populate('assignedEmployees', 'name email designation')
-                .populate('createdBy', 'name email')
-                .sort({ createdAt: -1 });
+            query = { createdBy: req.user._id };
         } else if (req.user.role === 'employee') {
-            // Employee can see projects they are assigned to
-            projects = await Project.find({ assignedEmployees: req.user._id })
-                .populate('assignedEmployees', 'name email designation')
-                .populate('createdBy', 'name email')
-                .sort({ createdAt: -1 });
+            query = { assignedEmployees: req.user._id };
         } else {
             return res.status(403).json({
                 success: false,
@@ -144,10 +135,27 @@ export const getAllProjects = async (req, res) => {
             });
         }
 
+        const totalCount = await Project.countDocuments(query);
+        const projects = await Project.find(query)
+            .populate('assignedEmployees', 'name email designation')
+            .populate('createdBy', 'name email')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        const projectsWithTaskCounts = await Promise.all(projects.map(async (project) => {
+            const taskCount = await Task.countDocuments({ project: project._id });
+            return {
+                ...project.toObject(),
+                taskCount
+            };
+        }));
+
         res.status(200).json({
             success: true,
-            count: projects.length,
-            projects,
+            count: projectsWithTaskCounts.length,
+            projects: projectsWithTaskCounts,
+            pagination: getPaginationMeta(page, limit, totalCount),
         });
     } catch (error) {
         console.error('Get Projects Error:', error);
@@ -209,6 +217,19 @@ export const getProjectById = async (req, res) => {
         const tasks = await Task.find({ project: project._id })
             .populate('assignedEmployee', 'name email designation')
             .populate('project', 'projectName');
+
+        // DEBUG: Log tasks and their progressUpdates
+        console.log('[DEBUG getProjectById] Tasks count:', tasks.length);
+        tasks.forEach((t, index) => {
+            console.log(`[DEBUG] Task ${index}: ${t.taskName}`);
+            console.log(`[DEBUG]   pendingApproval: ${t.pendingApproval}`);
+            console.log(`[DEBUG]   progressUpdates count: ${t.progressUpdates?.length || 0}`);
+            if (t.progressUpdates && t.progressUpdates.length > 0) {
+                const lastUpdate = t.progressUpdates[t.progressUpdates.length - 1];
+                console.log(`[DEBUG]   Last update photos:`, lastUpdate.photos);
+                console.log(`[DEBUG]   Last update notes:`, lastUpdate.notes);
+            }
+        });
 
         res.status(200).json({
             success: true,
@@ -274,7 +295,13 @@ export const updateProject = async (req, res) => {
         if (location !== undefined) project.location = location?.trim();
         if (assignedEmployees) project.assignedEmployees = assignedEmployees;
         if (deadline !== undefined) project.deadline = deadline;
-        if (status) project.status = status;
+        if (status) {
+            project.status = status;
+            // If project is marked as Completed, set progress to 100%
+            if (status === 'Completed') {
+                project.progress = 100;
+            }
+        }
 
         await project.save();
 

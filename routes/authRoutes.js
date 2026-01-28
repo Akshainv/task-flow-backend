@@ -4,7 +4,7 @@
  */
 
 import express from 'express';
-import { unifiedLogin, getProfile } from '../controllers/authController.js';
+import { unifiedLogin, getProfile, registerFCMToken } from '../controllers/authController.js';
 import { protectAny } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -25,5 +25,12 @@ router.post('/login', unifiedLogin);
  * @access  Private (Any authenticated user)
  */
 router.get('/profile', protectAny, getProfile);
+
+/**
+ * @route   POST /api/auth/fcm-token
+ * @desc    Register FCM token for any role
+ * @access  Private (Any authenticated user)
+ */
+router.post('/fcm-token', protectAny, registerFCMToken);
 
 export default router;

@@ -12,11 +12,6 @@ const serviceRequestSchema = new mongoose.Schema(
             ref: 'Manager',
             required: [true, 'Manager ID is required'],
         },
-        managerName: {
-            type: String,
-            required: [true, 'Manager name is required'],
-            trim: true,
-        },
         serviceType: {
             type: String,
             required: [true, 'Service type is required'],
@@ -26,11 +21,6 @@ const serviceRequestSchema = new mongoose.Schema(
             type: String,
             required: [true, 'Description is required'],
             trim: true,
-        },
-        priority: {
-            type: String,
-            enum: ['Low', 'Medium', 'High'],
-            required: [true, 'Priority is required'],
         },
         status: {
             type: String,

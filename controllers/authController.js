@@ -165,3 +165,61 @@ export const getProfile = async (req, res) => {
         });
     }
 };
+
+/**
+ * @desc    Register FCM token for current user
+ * @route   POST /api/auth/fcm-token
+ * @access  Private
+ */
+export const registerFCMToken = async (req, res) => {
+    try {
+        const { fcmToken } = req.body;
+        const email = req.user?.email;
+        console.log(`[FCM] Registration request from ${email}. Token: ${fcmToken ? fcmToken.substring(0, 10) + '...' : 'MISSING'}`);
+
+        if (!fcmToken) {
+            return res.status(400).json({
+                success: false,
+                message: 'FCM Token is required',
+            });
+        }
+
+        const role = req.user.role;
+        const userId = req.user._id;
+
+        // Ensure token uniqueness: Remove this token from any other user (Admin, Manager, or Employee)
+        // This handles cases where multiple users log in on the same device/browser
+        await Promise.all([
+            Admin.updateMany({ fcmToken }, { fcmToken: '' }),
+            Manager.updateMany({ fcmToken }, { fcmToken: '' }),
+            Employee.updateMany({ fcmToken }, { fcmToken: '' })
+        ]);
+
+        let user;
+        if (role === 'admin') {
+            user = await Admin.findByIdAndUpdate(userId, { fcmToken }, { new: true });
+        } else if (role === 'manager') {
+            user = await Manager.findByIdAndUpdate(userId, { fcmToken }, { new: true });
+        } else if (role === 'employee') {
+            user = await Employee.findByIdAndUpdate(userId, { fcmToken }, { new: true });
+        }
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found',
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'FCM Token registered successfully',
+        });
+    } catch (error) {
+        console.error('Register FCM Token Error:', error.message);
+        res.status(500).json({
+            success: false,
+            message: 'Server error. Please try again later.',
+        });
+    }
+};

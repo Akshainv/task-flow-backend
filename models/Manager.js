@@ -38,6 +38,16 @@ const managerSchema = new mongoose.Schema(
             type: String,
             default: 'manager',
         },
+        fcmToken: {
+            type: String,
+            default: '',
+        },
+        employees: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Employee',
+            },
+        ],
     },
     {
         timestamps: true,

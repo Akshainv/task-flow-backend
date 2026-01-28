@@ -5,6 +5,11 @@
 
 import mongoose from 'mongoose';
 import Notification from '../models/Notification.js';
+import Admin from '../models/Admin.js';
+import Manager from '../models/Manager.js';
+import Employee from '../models/Employee.js';
+import { sendPushNotification } from '../utils/firebase.js';
+import { getPaginationParams, getPaginationMeta } from '../utils/pagination.js';
 
 /**
  * Helper function to get user type from role
@@ -23,17 +28,22 @@ const getUserType = (role) => {
  */
 export const getMyNotifications = async (req, res) => {
     try {
+        const { page, limit, skip } = getPaginationParams(req.query);
         const userId = req.user._id;
         const userType = getUserType(req.user.role);
 
-        const notifications = await Notification.find({ userId, userType })
+        const query = { userId, userType };
+        const totalCount = await Notification.countDocuments(query);
+        const notifications = await Notification.find(query)
             .sort({ createdAt: -1 })
-            .limit(50);
+            .skip(skip)
+            .limit(limit);
 
         res.status(200).json({
             success: true,
             count: notifications.length,
             notifications,
+            pagination: getPaginationMeta(page, limit, totalCount),
         });
     } catch (error) {
         console.error('Get Notifications Error:', error.message);
@@ -160,6 +170,40 @@ export const createNotification = async (data) => {
             type: data.type || 'general',
             relatedId: data.relatedId || null,
         });
+
+        // Trigger Push Notification
+        try {
+            let recipient;
+            if (data.userType === 'Admin') {
+                recipient = await Admin.findById(data.userId);
+            } else if (data.userType === 'Manager') {
+                recipient = await Manager.findById(data.userId);
+            } else if (data.userType === 'Employee') {
+                recipient = await Employee.findById(data.userId);
+            }
+
+            if (recipient) {
+                if (recipient.fcmToken) {
+                    console.log(`Sending push notification to ${data.userType} ${data.userId} with token ${recipient.fcmToken.substring(0, 10)}...`);
+                    await sendPushNotification(
+                        recipient.fcmToken,
+                        data.title,
+                        data.message,
+                        {
+                            type: data.type || 'general',
+                            relatedId: data.relatedId ? data.relatedId.toString() : ''
+                        }
+                    );
+                } else {
+                    console.log(`No FCM token found for ${data.userType} ${data.userId}`);
+                }
+            } else {
+                console.log(`Recipient not found: ${data.userType} ${data.userId}`);
+            }
+        } catch (pushError) {
+            console.error('Push Notification Trigger Error:', pushError.message);
+        }
+
         return notification;
     } catch (error) {
         console.error('Create Notification Error:', error.message);
