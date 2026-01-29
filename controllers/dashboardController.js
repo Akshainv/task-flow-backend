@@ -52,35 +52,48 @@ export const getAdminDashboardStats = async (req, res) => {
  */
 export const getManagerDashboardStats = async (req, res) => {
     try {
+        const start = Date.now();
+        console.log(`\n--- [Dashboard] Starting stats fetch for Manager: ${req.user._id} ---`);
+
         // Get manager's projects
-        const managerProjects = await Project.find({ createdBy: req.user._id });
+        const managerProjects = await Project.find({ createdBy: req.user._id }).select('_id status');
         const projectIds = managerProjects.map(p => p._id);
+        console.log(`[Dashboard] Found ${managerProjects.length} projects in ${Date.now() - start}ms`);
 
         // Count ongoing projects (status not completed)
+        const ongoingStart = Date.now();
         const ongoingProjects = await Project.countDocuments({
             createdBy: req.user._id,
             status: { $ne: 'Completed' }
         });
+        console.log(`[Dashboard] Ongoing count: ${ongoingProjects} in ${Date.now() - ongoingStart}ms`);
 
         // Count completed projects
+        const completedStart = Date.now();
         const completedProjects = await Project.countDocuments({
             createdBy: req.user._id,
             status: 'Completed'
         });
+        console.log(`[Dashboard] Completed count: ${completedProjects} in ${Date.now() - completedStart}ms`);
 
         // Count pending tasks in manager's projects
+        const tasksStart = Date.now();
         const pendingTasks = await Task.countDocuments({
             project: { $in: projectIds },
             status: 'Pending'
         });
+        console.log(`[Dashboard] Pending tasks count: ${pendingTasks} in ${Date.now() - tasksStart}ms`);
 
-        // Get total projects if status field doesn't exist
+        // Get total projects
         const totalProjects = managerProjects.length;
+
+        const totalTime = Date.now() - start;
+        console.log(`--- [Dashboard] Total Stats Fetch Time: ${totalTime}ms ---\n`);
 
         res.status(200).json({
             success: true,
             stats: {
-                ongoingProjects: ongoingProjects || totalProjects,
+                ongoingProjects: ongoingProjects,
                 completedProjects,
                 pendingTasks,
                 totalProjects,

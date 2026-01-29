@@ -6,7 +6,7 @@ import {
     updateEmployeeServiceRequest,
     deleteEmployeeServiceRequest
 } from '../controllers/employeeServiceRequestController.js';
-import { protect, protectManager, protectAny } from '../middleware/authMiddleware.js';
+import { protectEmployee, protectManager, protectAny } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -14,10 +14,19 @@ const router = express.Router();
 // protectManager - specific to manager
 // protectEmployee - might be needed? Let's check authMiddleware.js
 
-router.post('/', protectAny, createEmployeeServiceRequest);
-router.get('/my-requests', protectAny, getMyEmployeeServiceRequests);
+// Create new request
+router.post('/', protectEmployee, createEmployeeServiceRequest);
+
+// Get employee's own requests
+router.get('/', protectEmployee, getMyEmployeeServiceRequests);
+
+// Get manager's received requests
 router.get('/received', protectManager, getReceivedEmployeeServiceRequests);
+
+// Update status
 router.put('/:id', protectManager, updateEmployeeServiceRequest);
+
+// Delete request
 router.delete('/:id', protectAny, deleteEmployeeServiceRequest);
 
 export default router;

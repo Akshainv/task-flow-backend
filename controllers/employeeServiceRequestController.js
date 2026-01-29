@@ -15,13 +15,6 @@ import { createNotification } from './notificationController.js';
  */
 export const createEmployeeServiceRequest = async (req, res) => {
     try {
-        if (!req.user || req.user.role !== 'employee') {
-            return res.status(401).json({
-                success: false,
-                message: 'Not authorized. Please login as an Employee.',
-            });
-        }
-
         const { serviceType, description } = req.body;
 
         if (!serviceType || !description) {
@@ -79,7 +72,9 @@ export const createEmployeeServiceRequest = async (req, res) => {
  */
 export const getMyEmployeeServiceRequests = async (req, res) => {
     try {
-        const serviceRequests = await EmployeeServiceRequest.find({ employeeId: req.user._id })
+        const employeeId = req.user._id;
+
+        const serviceRequests = await EmployeeServiceRequest.find({ employeeId })
             .populate('managerId', 'name email')
             .sort({ createdAt: -1 });
 
@@ -104,7 +99,9 @@ export const getMyEmployeeServiceRequests = async (req, res) => {
  */
 export const getReceivedEmployeeServiceRequests = async (req, res) => {
     try {
-        const serviceRequests = await EmployeeServiceRequest.find({ managerId: req.user._id })
+        const managerId = req.user._id;
+
+        const serviceRequests = await EmployeeServiceRequest.find({ managerId })
             .populate('employeeId', 'name email designation')
             .sort({ createdAt: -1 });
 

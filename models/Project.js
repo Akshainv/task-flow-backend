@@ -58,6 +58,10 @@ const projectSchema = new mongoose.Schema(
     }
 );
 
+// Add indexes for dashboard optimization
+projectSchema.index({ createdBy: 1, status: 1 });
+projectSchema.index({ status: 1 });
+
 const Project = mongoose.model('Project', projectSchema);
 
 export default Project;

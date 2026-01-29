@@ -20,7 +20,7 @@ import Employee from '../models/Employee.js';
  */
 export const unifiedLogin = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, password, role: requestedRole } = req.body;
 
         // Validate input
         if (!email || !password) {
@@ -34,48 +34,81 @@ export const unifiedLogin = async (req, res) => {
         let user = null;
         let role = null;
 
-        // Step 1: Check Admin collection
-        // Note: Admin model uses bcrypt.compare directly (no matchPassword method)
-        const admin = await Admin.findOne({ email: normalizedEmail });
-        if (admin) {
-            const isMatch = await bcrypt.compare(password, admin.password);
-            if (isMatch) {
-                user = admin;
-                role = 'admin';
-            }
-        }
-
-        // Step 2: If not admin, check Manager collection
-        // Note: Manager model has matchPassword method
-        if (!user) {
-            const manager = await Manager.findOne({ email: normalizedEmail });
-            if (manager) {
-                const isMatch = await manager.matchPassword(password);
+        // Step 1: Check requested role and search in corresponding collection
+        if (!requestedRole) {
+            // Fallback for backward compatibility or if role not provided
+            // Step 1: Check Admin collection
+            const admin = await Admin.findOne({ email: normalizedEmail });
+            if (admin) {
+                const isMatch = await bcrypt.compare(password, admin.password);
                 if (isMatch) {
-                    user = manager;
-                    role = 'manager';
+                    user = admin;
+                    role = 'admin';
+                }
+            }
+
+            // Step 2: If not admin, check Manager collection
+            if (!user) {
+                const manager = await Manager.findOne({ email: normalizedEmail });
+                if (manager) {
+                    const isMatch = await manager.matchPassword(password);
+                    if (isMatch) {
+                        user = manager;
+                        role = 'manager';
+                    }
+                }
+            }
+
+            // Step 3: If not manager, check Employee collection
+            if (!user) {
+                const employee = await Employee.findOne({ email: normalizedEmail });
+                if (employee) {
+                    const isMatch = await employee.matchPassword(password);
+                    if (isMatch) {
+                        user = employee;
+                        role = 'employee';
+                    }
+                }
+            }
+        } else {
+            // Enforce role-wise login
+            if (requestedRole === 'admin') {
+                const admin = await Admin.findOne({ email: normalizedEmail });
+                if (admin) {
+                    const isMatch = await bcrypt.compare(password, admin.password);
+                    if (isMatch) {
+                        user = admin;
+                        role = 'admin';
+                    }
+                }
+            } else if (requestedRole === 'manager') {
+                const manager = await Manager.findOne({ email: normalizedEmail });
+                if (manager) {
+                    const isMatch = await manager.matchPassword(password);
+                    if (isMatch) {
+                        user = manager;
+                        role = 'manager';
+                    }
+                }
+            } else if (requestedRole === 'employee') {
+                const employee = await Employee.findOne({ email: normalizedEmail });
+                if (employee) {
+                    const isMatch = await employee.matchPassword(password);
+                    if (isMatch) {
+                        user = employee;
+                        role = 'employee';
+                    }
                 }
             }
         }
 
-        // Step 3: If not manager, check Employee collection
-        // Note: Employee model has matchPassword method
-        if (!user) {
-            const employee = await Employee.findOne({ email: normalizedEmail });
-            if (employee) {
-                const isMatch = await employee.matchPassword(password);
-                if (isMatch) {
-                    user = employee;
-                    role = 'employee';
-                }
-            }
-        }
-
-        // If no user found in any collection
+        // If no user found or password didn't match
         if (!user) {
             return res.status(401).json({
                 success: false,
-                message: 'Invalid email or password',
+                message: requestedRole
+                    ? `Invalid ${requestedRole} credentials`
+                    : 'Invalid email or password',
             });
         }
 

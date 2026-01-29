@@ -65,6 +65,12 @@ const taskSchema = new mongoose.Schema(
     }
 );
 
+// Add indexes for dashboard and project optimization
+taskSchema.index({ project: 1, status: 1 });
+taskSchema.index({ assignedEmployee: 1, status: 1 });
+taskSchema.index({ status: 1 });
+taskSchema.index({ createdBy: 1 });
+
 const Task = mongoose.model('Task', taskSchema);
 
 export default Task;

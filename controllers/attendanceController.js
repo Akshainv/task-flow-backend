@@ -171,13 +171,13 @@ export const getEmployeeHistory = async (req, res) => {
         const { employeeId } = req.params;
         const history = await Attendance.find({ employeeId }).sort({ date: -1, clockInTime: -1 });
 
-        // Filter out records older than 24 hours (as per user request)
+        // Filter out records older than 7 days (168 hours)
         const now = new Date();
         const refinedHistory = history
             .filter(record => {
                 const clockInTime = new Date(record.clockInTime);
                 const diffInHours = (now - clockInTime) / (1000 * 60 * 60);
-                return diffInHours <= 24;
+                return diffInHours <= 168;
             })
             .map(record => record.toObject());
 

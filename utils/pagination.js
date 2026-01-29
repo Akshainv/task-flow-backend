@@ -10,7 +10,8 @@
  */
 export const getPaginationParams = (query) => {
     const page = Math.max(1, parseInt(query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(query.limit) || 10));
+    // Set default limit to 10 as requested for standard pagination
+    const limit = Math.min(1000, Math.max(1, parseInt(query.limit) || 10));
     const skip = (page - 1) * limit;
     return { page, limit, skip };
 };

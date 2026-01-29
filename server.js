@@ -54,8 +54,21 @@ app.use(express.json());
 // Parse URL-encoded request bodies
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files from uploads directory
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Serve static files from uploads directory with proper MIME types for audio/video
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+    setHeaders: (res, filePath) => {
+        // Set correct MIME types for audio files
+        if (filePath.endsWith('.webm')) {
+            res.setHeader('Content-Type', 'audio/webm');
+        } else if (filePath.endsWith('.ogg')) {
+            res.setHeader('Content-Type', 'audio/ogg');
+        } else if (filePath.endsWith('.mp3')) {
+            res.setHeader('Content-Type', 'audio/mpeg');
+        } else if (filePath.endsWith('.wav')) {
+            res.setHeader('Content-Type', 'audio/wav');
+        }
+    }
+}));
 
 // ===== ROUTES =====
 

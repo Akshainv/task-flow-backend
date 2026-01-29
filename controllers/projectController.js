@@ -143,18 +143,21 @@ export const getAllProjects = async (req, res) => {
             .skip(skip)
             .limit(limit);
 
-        const projectsWithTaskCounts = await Promise.all(projects.map(async (project) => {
-            const taskCount = await Task.countDocuments({ project: project._id });
+        const projectsWithTaskDetails = await Promise.all(projects.map(async (project) => {
+            const projectTasks = await Task.find({ project: project._id })
+                .select('taskName status');
+
             return {
                 ...project.toObject(),
-                taskCount
+                taskCount: projectTasks.length,
+                tasks: projectTasks
             };
         }));
 
         res.status(200).json({
             success: true,
-            count: projectsWithTaskCounts.length,
-            projects: projectsWithTaskCounts,
+            count: projectsWithTaskDetails.length,
+            projects: projectsWithTaskDetails,
             pagination: getPaginationMeta(page, limit, totalCount),
         });
     } catch (error) {
