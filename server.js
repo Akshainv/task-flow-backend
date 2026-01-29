@@ -37,16 +37,28 @@ connectDB();
 
 // ===== MIDDLEWARE =====
 
-// Enable CORS for all origins in production
+// ✅ FIXED CORS CONFIG (Render + Vercel safe)
+const allowedOrigins = [
+  'http://localhost:4200',
+  'http://localhost:3000',
+  'https://task-management-infynix.vercel.app'
+];
+
 const corsOptions = {
-    origin: process.env.NODE_ENV === 'production'
-        ? true // Allow all origins in production (or specify your frontend URL)
-        : ['http://localhost:4200', 'http://localhost:3000'],
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 };
+
 app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 // Parse JSON request bodies
 app.use(express.json());
@@ -56,44 +68,43 @@ app.use(express.urlencoded({ extended: true }));
 
 // Serve static files from uploads directory with proper MIME types for audio/video
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
-    setHeaders: (res, filePath) => {
-        // Set correct MIME types for audio files
-        if (filePath.endsWith('.webm')) {
-            res.setHeader('Content-Type', 'audio/webm');
-        } else if (filePath.endsWith('.ogg')) {
-            res.setHeader('Content-Type', 'audio/ogg');
-        } else if (filePath.endsWith('.mp3')) {
-            res.setHeader('Content-Type', 'audio/mpeg');
-        } else if (filePath.endsWith('.wav')) {
-            res.setHeader('Content-Type', 'audio/wav');
-        }
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.webm')) {
+      res.setHeader('Content-Type', 'audio/webm');
+    } else if (filePath.endsWith('.ogg')) {
+      res.setHeader('Content-Type', 'audio/ogg');
+    } else if (filePath.endsWith('.mp3')) {
+      res.setHeader('Content-Type', 'audio/mpeg');
+    } else if (filePath.endsWith('.wav')) {
+      res.setHeader('Content-Type', 'audio/wav');
     }
+  }
 }));
 
 // ===== ROUTES =====
 
 // Root endpoint
 app.get('/', (req, res) => {
-    res.status(200).json({
-        success: true,
-        message: 'Task Flow API Server',
-        version: '1.0.0',
-        endpoints: {
-            health: '/api/health',
-            auth: '/api/auth',
-            admin: '/api/admin',
-            managers: '/api/managers',
-            employees: '/api/employees',
-            projects: '/api/projects',
-            tasks: '/api/tasks',
-        },
-    });
+  res.status(200).json({
+    success: true,
+    message: 'Task Flow API Server',
+    version: '1.0.0',
+    endpoints: {
+      health: '/api/health',
+      auth: '/api/auth',
+      admin: '/api/admin',
+      managers: '/api/managers',
+      employees: '/api/employees',
+      projects: '/api/projects',
+      tasks: '/api/tasks',
+    },
+  });
 });
 
-// Unified Auth Routes (Single Login for All Roles)
+// Unified Auth Routes
 app.use('/api/auth', authRoutes);
 
-// Admin Authentication Routes (legacy - still works)
+// Admin Routes
 app.use('/api/admin', adminAuthRoutes);
 
 // Manager Routes
@@ -102,7 +113,7 @@ app.use('/api/managers', managerRoutes);
 // Employee Routes
 app.use('/api/employees', employeeRoutes);
 
-// Attendance Routes (Moved Up for Priority)
+// Attendance Routes
 app.use('/api/attendance', attendanceRoutes);
 
 // Project Routes
@@ -126,39 +137,44 @@ app.use('/api/employee-service-requests', employeeServiceRequestRoutes);
 // Team Routes
 app.use('/api/teams', teamRoutes);
 
-// Health check endpoint
+// Health check
 app.get('/api/health', (req, res) => {
-    res.status(200).json({
-        success: true,
-        message: 'Task Flow API is running',
-        environment: process.env.NODE_ENV || 'development',
-        timestamp: new Date().toISOString(),
-    });
+  res.status(200).json({
+    success: true,
+    message: 'Task Flow API is running',
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString(),
+  });
 });
 
-// 404 Handler - Route not found
+// 404 Handler
 app.use((req, res) => {
-    res.status(404).json({
-        success: false,
-        message: `Route ${req.originalUrl} not found`,
-    });
+  res.status(404).json({
+    success: false,
+    message: `Route ${req.originalUrl} not found`,
+  });
 });
 
 // Global Error Handler
 app.use((err, req, res, next) => {
-    console.error('Server Error:', err);
-    res.status(500).json({
-        success: false,
-        message: 'Internal server error',
-    });
+  console.error('Server Error:', err);
+  res.status(500).json({
+    success: false,
+    message: 'Internal server error',
+  });
 });
 
 // ===== START SERVER =====
 
 const PORT = process.env.PORT || 5000;
 
+const BASE_URL =
+  process.env.NODE_ENV === 'production'
+    ? 'https://task-flow-backend-1.onrender.com'
+    : `http://localhost:${PORT}`;
+
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`📍 API Base URL: http://localhost:${PORT}/api`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`📍 API Base URL: ${BASE_URL}/api`);
 });
