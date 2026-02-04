@@ -19,6 +19,7 @@ router.post('/', protectEmployee, createEmployeeServiceRequest);
 
 // Get employee's own requests
 router.get('/', protectEmployee, getMyEmployeeServiceRequests);
+router.get('/my-requests', protectEmployee, getMyEmployeeServiceRequests);
 
 // Get manager's received requests
 router.get('/received', protectManager, getReceivedEmployeeServiceRequests);

@@ -4,6 +4,11 @@
  */
 
 import mongoose from 'mongoose';
+import dns from 'dns';
+
+// Configure Node.js to use Google DNS for SRV lookups
+// This fixes "querySrv ECONNREFUSED" errors on restrictive networks
+dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
 
 /**
  * Connects to MongoDB using the URI from environment variables

@@ -5,6 +5,7 @@
 
 import mongoose from 'mongoose';
 import ServiceRequest from '../models/ServiceRequest.js';
+import Admin from '../models/Admin.js';
 import { createNotification } from './notificationController.js';
 
 /**
@@ -45,6 +46,19 @@ export const createServiceRequest = async (req, res) => {
             serviceType: serviceType.trim(),
             description: description.trim(),
         });
+
+        // Notify all admins
+        const admins = await Admin.find({});
+        for (const admin of admins) {
+            await createNotification({
+                userId: admin._id,
+                userType: 'Admin',
+                title: 'New Service Request',
+                message: `Manager ${req.user.name} has sent a new service request: ${serviceType.trim()}`,
+                type: 'service_request',
+                relatedId: serviceRequest._id
+            });
+        }
 
         res.status(201).json({
             success: true,

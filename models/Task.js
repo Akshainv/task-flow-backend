@@ -29,6 +29,15 @@ const taskSchema = new mongoose.Schema(
         deadline: {
             type: Date,
         },
+        priority: {
+            type: String,
+            enum: ['Low', 'Medium', 'High'],
+            default: 'Medium'
+        },
+        deadlineTime: {
+            type: String,
+            trim: true,
+        },
         project: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Project',
@@ -44,6 +53,7 @@ const taskSchema = new mongoose.Schema(
             photos: [String],
             voiceNote: String,
             notes: String,
+            deadlineTime: String,
             submittedAt: { type: Date, default: Date.now },
             approvalStatus: {
                 type: String,

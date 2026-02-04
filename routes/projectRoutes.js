@@ -20,7 +20,7 @@ const router = express.Router();
  * @desc    Create a new project
  * @access  Private (Manager only)
  */
-router.post('/', protectManager, createProject);
+router.post('/', protectAny, createProject);
 
 /**
  * @route   GET /api/projects

@@ -17,15 +17,17 @@ import { getPaginationParams, getPaginationMeta } from '../utils/pagination.js';
  */
 export const createProject = async (req, res) => {
     try {
-        // Safety check: Ensure req.user exists (should be set by protectManager middleware)
+        // Safety check: Ensure req.user exists
         if (!req.user || !req.user._id) {
             return res.status(401).json({
                 success: false,
-                message: 'Not authorized. Please login as a Manager.',
+                message: 'Not authorized. Please login.',
             });
         }
 
-        const { projectName, description, clientName, clientPhone, location, assignedEmployees, deadline, status } = req.body;
+        const isAdmin = req.user.role === 'admin';
+
+        const { projectName, description, clientName, clientPhone, location, assignedEmployees, deadline, status, managerId } = req.body;
 
         // Validate required fields
         if (!projectName) {
@@ -35,32 +37,40 @@ export const createProject = async (req, res) => {
             });
         }
 
-        if (!assignedEmployees || assignedEmployees.length === 0) {
+        if (!isAdmin && (!assignedEmployees || assignedEmployees.length === 0)) {
             return res.status(400).json({
                 success: false,
                 message: 'At least one employee must be assigned',
             });
         }
 
-        // Validate that all assignedEmployees are valid ObjectIds
-        const invalidIds = assignedEmployees.filter(id => !mongoose.Types.ObjectId.isValid(id));
-        if (invalidIds.length > 0) {
+        if (isAdmin && !managerId) {
             return res.status(400).json({
                 success: false,
-                message: 'Invalid employee ID format',
+                message: 'Manager ID is required for admin-created projects',
             });
         }
 
-        // Verify all assigned employees exist
-        const employeeCount = await Employee.countDocuments({
-            _id: { $in: assignedEmployees }
-        });
+        if (assignedEmployees && assignedEmployees.length > 0) {
+            const invalidIds = assignedEmployees.filter(id => !mongoose.Types.ObjectId.isValid(id));
+            if (invalidIds.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid employee ID format',
+                });
+            }
 
-        if (employeeCount !== assignedEmployees.length) {
-            return res.status(400).json({
-                success: false,
-                message: 'One or more assigned employees not found',
+            // Verify all assigned employees exist
+            const employeeCount = await Employee.countDocuments({
+                _id: { $in: assignedEmployees }
             });
+
+            if (employeeCount !== assignedEmployees.length) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'One or more assigned employees not found',
+                });
+            }
         }
 
         // Create project
@@ -70,10 +80,11 @@ export const createProject = async (req, res) => {
             clientName: clientName?.trim() || '',
             clientPhone: clientPhone?.trim() || '',
             location: location?.trim() || '',
-            assignedEmployees,
+            assignedEmployees: assignedEmployees || [],
             deadline: deadline || null,
             status: status || 'Pending',
-            createdBy: req.user._id, // Manager ID from auth middleware
+            createdBy: isAdmin ? managerId : req.user._id,
+            adminCreated: isAdmin
         });
 
         // Populate employee details for response
@@ -83,7 +94,6 @@ export const createProject = async (req, res) => {
         // Create notifications for assigned employees
         if (assignedEmployees && assignedEmployees.length > 0) {
             for (const employeeId of assignedEmployees) {
-                console.log(`Creating notification for project assignment: Employee ${employeeId}`);
                 await createNotification({
                     userId: employeeId,
                     userType: 'Employee',
@@ -93,6 +103,18 @@ export const createProject = async (req, res) => {
                     relatedId: project._id
                 });
             }
+        }
+
+        // Notify manager if created by admin
+        if (isAdmin) {
+            await createNotification({
+                userId: managerId,
+                userType: 'Manager',
+                title: 'New Project Assigned by Admin',
+                message: `Admin has assigned a new project to you: ${project.projectName}. Please assign employees to start.`,
+                type: 'project_created',
+                relatedId: project._id
+            });
         }
 
         res.status(201).json({
@@ -145,7 +167,7 @@ export const getAllProjects = async (req, res) => {
 
         const projectsWithTaskDetails = await Promise.all(projects.map(async (project) => {
             const projectTasks = await Task.find({ project: project._id })
-                .select('taskName status');
+                .select('taskName status deadlineTime');
 
             return {
                 ...project.toObject(),
@@ -156,7 +178,7 @@ export const getAllProjects = async (req, res) => {
 
         res.status(200).json({
             success: true,
-            count: projectsWithTaskDetails.length,
+            count: totalCount,
             projects: projectsWithTaskDetails,
             pagination: getPaginationMeta(page, limit, totalCount),
         });
@@ -296,7 +318,15 @@ export const updateProject = async (req, res) => {
         if (clientName !== undefined) project.clientName = clientName?.trim();
         if (clientPhone !== undefined) project.clientPhone = clientPhone?.trim();
         if (location !== undefined) project.location = location?.trim();
-        if (assignedEmployees) project.assignedEmployees = assignedEmployees;
+
+        let newEmployeeIds = [];
+        if (assignedEmployees) {
+            // Identify newly assigned employees
+            const existingEmployeeIds = project.assignedEmployees.map(id => id.toString());
+            newEmployeeIds = assignedEmployees.filter(id => !existingEmployeeIds.includes(id.toString()));
+
+            project.assignedEmployees = assignedEmployees;
+        }
         if (deadline !== undefined) project.deadline = deadline;
         if (status) {
             project.status = status;
@@ -307,6 +337,20 @@ export const updateProject = async (req, res) => {
         }
 
         await project.save();
+
+        // Send notifications to newly assigned employees
+        if (newEmployeeIds.length > 0) {
+            for (const employeeId of newEmployeeIds) {
+                await createNotification({
+                    userId: employeeId,
+                    userType: 'Employee',
+                    title: 'New Project Assignment',
+                    message: `You have been assigned to project: ${project.projectName}`,
+                    type: 'project_created',
+                    relatedId: project._id
+                });
+            }
+        }
 
         // Populate for response
         await project.populate('assignedEmployees', 'name email designation');

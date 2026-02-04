@@ -75,7 +75,8 @@ export const createTask = async (req, res) => {
         }
 
         const { projectId } = req.params;
-        const { taskName, description, assignedEmployee, deadline } = req.body;
+        const { taskName, description, assignedEmployee, deadline, priority, deadlineTime } = req.body;
+        console.log('[Backend createTask] req.body:', JSON.stringify(req.body));
 
         // Validate required fields
         if (!taskName || !taskName.trim()) {
@@ -152,6 +153,8 @@ export const createTask = async (req, res) => {
             description: description?.trim() || '',
             assignedEmployee,
             deadline: deadline || null,
+            priority: priority || 'Medium',
+            deadlineTime: deadlineTime || '',
             project: projectId,
             createdBy: req.user._id,
         });
@@ -338,7 +341,7 @@ export const getTaskById = async (req, res) => {
  */
 export const updateTask = async (req, res) => {
     try {
-        const { taskName, description, assignedEmployee, status, deadline, project } = req.body;
+        const { taskName, description, assignedEmployee, status, deadline, project, priority, deadlineTime } = req.body;
 
         const task = await Task.findById(req.params.id);
 
@@ -378,6 +381,8 @@ export const updateTask = async (req, res) => {
             if (assignedEmployee) task.assignedEmployee = assignedEmployee;
             if (status) task.status = status;
             if (deadline !== undefined) task.deadline = deadline;
+            if (priority) task.priority = priority;
+            if (deadlineTime !== undefined) task.deadlineTime = deadlineTime;
             // Note: project change is not allowed after creation
 
         } else if (req.user.role === 'employee') {
@@ -559,8 +564,10 @@ export const getMyTasks = async (req, res) => {
 export const getTasks = async (req, res) => {
     try {
         const { page, limit, skip } = getPaginationParams(req.query);
+        const { project, priority, status, deadline } = req.query;
         let query = {};
 
+        // Role-based filtering
         if (req.user.role === 'manager') {
             const manager = await Manager.findById(req.user._id);
             const teamMemberIds = manager?.employees || [];
@@ -574,7 +581,37 @@ export const getTasks = async (req, res) => {
         } else if (req.user.role === 'employee') {
             query = { assignedEmployee: req.user._id };
         }
-        // Admin sees all (empty query)
+        // Admin sees all (empty query initially)
+
+        // Apply additional filters
+        if (project && mongoose.Types.ObjectId.isValid(project)) {
+            query.project = project;
+        }
+        if (priority && ['Low', 'Medium', 'High'].includes(priority)) {
+            query.priority = priority;
+        }
+        if (status && ['Pending', 'In Progress', 'Completed'].includes(status)) {
+            query.status = status;
+        }
+        if (deadline) {
+            // Support simple deadline filters: 'overdue', 'today', 'upcoming'
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+
+            if (deadline === 'overdue') {
+                query.deadline = { $lt: today, $ne: null };
+                // Only add status constraint if user hasn't selected a specific status
+                if (!status) {
+                    query.status = { $ne: 'Completed' };
+                }
+            } else if (deadline === 'today') {
+                query.deadline = { $gte: today, $lt: tomorrow };
+            } else if (deadline === 'upcoming') {
+                query.deadline = { $gte: tomorrow };
+            }
+        }
 
         const totalCount = await Task.countDocuments(query);
         const tasks = await Task.find(query)
