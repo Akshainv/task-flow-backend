@@ -7,125 +7,113 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import Manager from '../models/Manager.js';
 import { getPaginationParams, getPaginationMeta } from '../utils/pagination.js';
+import catchAsync from '../utils/catchAsync.js';
+import AppError from '../utils/AppError.js';
 
 /**
  * @desc    Create new manager
  * @route   POST /api/managers
  * @access  Private (Admin only)
  */
-export const createManager = async (req, res) => {
-    try {
-        const { name, email, password, company, contactNumber } = req.body;
-        console.log('BODY:', req.body);
+export const createManager = catchAsync(async (req, res, next) => {
+    const { name, email, password, company, contactNumber } = req.body;
 
-        // Validate required fields
-        if (!name || !email || !password || !company || !contactNumber) {
-            return res.status(400).json({
-                success: false,
-                message: 'Please provide all required fields',
-            });
-        }
-
-
-
-        // Check if manager already exists
-        const existingManager = await Manager.findOne({ email: email.toLowerCase().trim() });
-        if (existingManager) {
-            return res.status(400).json({
-                success: false,
-                message: 'Manager with this email already exists',
-            });
-        }
-
-        // Create manager (password will be hashed by pre-save middleware)
-        const manager = await Manager.create({
-            name: name.trim(),
-            email: email.toLowerCase().trim(),
-            password,
-            company: company.trim(),
-            contactNumber: contactNumber.trim(),
-        });
-
-        res.status(201).json({
-            success: true,
-            message: 'Manager created successfully',
-            manager: {
-                id: manager._id,
-                name: manager.name,
-                email: manager.email,
-                company: manager.company,
-                contactNumber: manager.contactNumber,
-                role: manager.role,
-            },
-        });
-    } catch (error) {
-        console.error('Create Manager Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error. Please try again later.',
-        });
+    // Validate required fields
+    if (!name || !email || !password || !company || !contactNumber) {
+        return next(new AppError('Please provide all required fields', 400));
     }
-};
+
+    // Check if manager already exists
+    const existingManager = await Manager.findOne({ email: email.toLowerCase().trim() });
+    if (existingManager) {
+        return next(new AppError('Manager with this email already exists', 400));
+    }
+
+    // Create manager (password will be hashed by pre-save middleware)
+    const manager = await Manager.create({
+        name: name.trim(),
+        email: email.toLowerCase().trim(),
+        password,
+        company: company.trim(),
+        contactNumber: contactNumber.trim(),
+    });
+
+    res.status(201).json({
+        success: true,
+        message: 'Manager created successfully',
+        manager: {
+            id: manager._id,
+            name: manager.name,
+            email: manager.email,
+            company: manager.company,
+            contactNumber: manager.contactNumber,
+            role: manager.role,
+        },
+    });
+});
 
 /**
  * @desc    Get all managers
  * @route   GET /api/managers
  * @access  Private (Admin only)
  */
-export const getAllManagers = async (req, res) => {
-    try {
-        const { page, limit, skip } = getPaginationParams(req.query);
+export const getAllManagers = catchAsync(async (req, res, next) => {
+    const { page, limit, skip } = getPaginationParams(req.query);
 
-        const totalCount = await Manager.countDocuments();
-        const managers = await Manager.find()
+    const totalCount = await Manager.countDocuments();
+    const managers = await Manager.find()
+        .select('-password')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit);
+
+    // Lazy migration: Update managers missing plainPassword
+    const managersToUpdate = managers.filter(mgr => !mgr.plainPassword || mgr.plainPassword === '');
+    if (managersToUpdate.length > 0) {
+        for (const mgr of managersToUpdate) {
+            mgr.password = '123456';
+            await mgr.save();
+        }
+        // Re-fetch to get updated values
+        const updatedManagers = await Manager.find()
             .select('-password')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit);
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
-            count: managers.length,
-            managers,
+            count: updatedManagers.length,
+            managers: updatedManagers.map(m => m.toObject()),
             pagination: getPaginationMeta(page, limit, totalCount),
         });
-    } catch (error) {
-        console.error('Get Managers Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error. Please try again later.',
-        });
     }
-};
+
+    res.status(200).json({
+        success: true,
+        count: managers.length,
+        managers,
+        pagination: getPaginationMeta(page, limit, totalCount),
+    });
+});
 
 /**
  * @desc    Get single manager by ID
  * @route   GET /api/managers/:id
  * @access  Private (Admin only)
  */
-export const getManagerById = async (req, res) => {
-    try {
-        const manager = await Manager.findById(req.params.id).select('-password');
+export const getManagerById = catchAsync(async (req, res, next) => {
+    const manager = await Manager.findById(req.params.id).select('-password');
 
-        if (!manager) {
-            return res.status(404).json({
-                success: false,
-                message: 'Manager not found',
-            });
-        }
-
-        res.status(200).json({
-            success: true,
-            manager,
-        });
-    } catch (error) {
-        console.error('Get Manager Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error. Please try again later.',
-        });
+    if (!manager) {
+        return next(new AppError('Manager not found', 404));
     }
-};
+
+    res.status(200).json({
+        success: true,
+        manager,
+    });
+});
 
 /**
  * @desc    Update manager

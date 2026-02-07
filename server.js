@@ -156,22 +156,18 @@ app.get('/api/health', (req, res) => {
     });
 });
 
+import AppError from './utils/AppError.js';
+import { globalErrorHandler } from './middleware/errorMiddleware.js';
+
+// ... (after all routes)
+
 // 404 Handler
-app.use((req, res) => {
-    res.status(404).json({
-        success: false,
-        message: `Route ${req.originalUrl} not found`,
-    });
+app.all('*', (req, res, next) => {
+    next(new AppError(`Can't find ${req.originalUrl} on this server!`, 404));
 });
 
 // Global Error Handler
-app.use((err, req, res, next) => {
-    console.error('Server Error:', err);
-    res.status(500).json({
-        success: false,
-        message: 'Internal server error',
-    });
-});
+app.use(globalErrorHandler);
 
 // ===== START SERVER =====
 

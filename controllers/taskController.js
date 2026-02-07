@@ -14,6 +14,8 @@ import Manager from '../models/Manager.js';
 import { createNotification } from './notificationController.js';
 import { getPaginationParams, getPaginationMeta } from '../utils/pagination.js';
 import { fileURLToPath } from 'url';
+import catchAsync from '../utils/catchAsync.js';
+import AppError from '../utils/AppError.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,275 +66,186 @@ export const uploadTaskPhotos = multer({
  * @route   POST /api/tasks
  * @access  Private (Manager only)
  */
-export const createTask = async (req, res) => {
-    try {
-        // Safety check: Ensure req.user exists (should be set by protectManager middleware)
-        if (!req.user || !req.user._id) {
-            return res.status(401).json({
-                success: false,
-                message: 'Not authorized. Please login as a Manager.',
-            });
-        }
-
-        const { projectId } = req.params;
-        const { taskName, description, assignedEmployee, deadline, priority, deadlineTime } = req.body;
-        console.log('[Backend createTask] req.body:', JSON.stringify(req.body));
-
-        // Validate required fields
-        if (!taskName || !taskName.trim()) {
-            return res.status(400).json({
-                success: false,
-                message: 'Task name is required',
-            });
-        }
-
-        if (!assignedEmployee) {
-            return res.status(400).json({
-                success: false,
-                message: 'Assigned employee is required',
-            });
-        }
-
-        // Note: Project validation is moved to after params check
-
-        // Validate ObjectId formats
-        if (!mongoose.Types.ObjectId.isValid(assignedEmployee)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid employee ID format',
-            });
-        }
-
-        if (!mongoose.Types.ObjectId.isValid(projectId)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid project ID format',
-            });
-        }
-
-        // Verify project exists and belongs to the manager
-        const projectDoc = await Project.findById(projectId);
-        if (!projectDoc) {
-            return res.status(404).json({
-                success: false,
-                message: 'Project not found',
-            });
-        }
-
-        // Check if manager owns the project
-        if (projectDoc.createdBy.toString() !== req.user._id.toString()) {
-            return res.status(403).json({
-                success: false,
-                message: 'Access denied. You can only create tasks for your own projects.',
-            });
-        }
-
-        // Verify employee exists
-        const employee = await Employee.findById(assignedEmployee);
-        if (!employee) {
-            return res.status(404).json({
-                success: false,
-                message: 'Employee not found',
-            });
-        }
-
-        // Check if employee is assigned to the project
-        const isAssignedToProject = projectDoc.assignedEmployees.some(
-            emp => emp.toString() === assignedEmployee
-        );
-        if (!isAssignedToProject) {
-            return res.status(400).json({
-                success: false,
-                message: 'Employee must be assigned to the project first',
-            });
-        }
-
-        // Create task
-        const task = await Task.create({
-            taskName: taskName.trim(),
-            description: description?.trim() || '',
-            assignedEmployee,
-            deadline: deadline || null,
-            priority: priority || 'Medium',
-            deadlineTime: deadlineTime || '',
-            project: projectId,
-            createdBy: req.user._id,
-        });
-
-        // Populate for response
-        await task.populate('assignedEmployee', 'name email designation');
-        await task.populate('project', 'projectName');
-        await task.populate('createdBy', 'name email');
-
-        // Create notification for assigned employee
-        console.log(`Creating notification for task assignment: Employee ${assignedEmployee}`);
-        await createNotification({
-            userId: assignedEmployee,
-            userType: 'Employee',
-            title: 'New Task Assigned',
-            message: `You have been assigned a new task: ${task.taskName}`,
-            type: 'task_assigned',
-            relatedId: task._id
-        });
-
-        res.status(201).json({
-            success: true,
-            message: 'Task created successfully',
-            task,
-        });
-    } catch (error) {
-        console.error('Create Task Error:', error.message);
-        console.error('Stack:', error.stack);
-
-        // Handle specific MongoDB errors
-        if (error.name === 'CastError') {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid ID format provided',
-            });
-        }
-
-        res.status(500).json({
-            success: false,
-            message: 'Server error. Please try again later.',
-        });
+export const createTask = catchAsync(async (req, res, next) => {
+    // Safety check: Ensure req.user exists (should be set by protectManager middleware)
+    if (!req.user || !req.user._id) {
+        return next(new AppError('Not authorized. Please login as a Manager.', 401));
     }
-};
+
+    const { projectId } = req.params;
+    const { taskName, description, assignedEmployee, deadline, priority, deadlineTime } = req.body;
+
+    // Validate required fields
+    if (!taskName || (typeof taskName === 'string' && !taskName.trim())) {
+        return next(new AppError('Task name is required', 400));
+    }
+
+    if (!assignedEmployee) {
+        return next(new AppError('Assigned employee is required', 400));
+    }
+
+    // Validate ObjectId formats
+    if (!mongoose.Types.ObjectId.isValid(assignedEmployee)) {
+        return next(new AppError('Invalid employee ID format', 400));
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+        return next(new AppError('Invalid project ID format', 400));
+    }
+
+    // Verify project exists and belongs to the manager
+    const projectDoc = await Project.findById(projectId);
+    if (!projectDoc) {
+        return next(new AppError('Project not found', 404));
+    }
+
+    // Check if manager owns the project
+    if (projectDoc.createdBy.toString() !== req.user._id.toString()) {
+        return next(new AppError('Access denied. You can only create tasks for your own projects.', 403));
+    }
+
+    // Verify employee exists
+    const employee = await Employee.findById(assignedEmployee);
+    if (!employee) {
+        return next(new AppError('Employee not found', 404));
+    }
+
+    // Check if employee is assigned to the project
+    const isAssignedToProject = projectDoc.assignedEmployees.some(
+        emp => emp.toString() === assignedEmployee
+    );
+    if (!isAssignedToProject) {
+        return next(new AppError('Employee must be assigned to the project first', 400));
+    }
+
+    // Create task
+    const task = await Task.create({
+        taskName: String(taskName).trim(),
+        description: description ? String(description).trim() : '',
+        assignedEmployee,
+        deadline: deadline || null,
+        priority: priority || 'Medium',
+        deadlineTime: deadlineTime || '',
+        project: projectId,
+        createdBy: req.user._id,
+    });
+
+    // Populate for response
+    await task.populate('assignedEmployee', 'name email designation');
+    await task.populate('project', 'projectName');
+    await task.populate('createdBy', 'name email');
+
+    // Create notification for assigned employee
+    await createNotification({
+        userId: assignedEmployee,
+        userType: 'Employee',
+        title: 'New Task Assigned',
+        message: `You have been assigned a new task: ${task.taskName}`,
+        type: 'task_assigned',
+        relatedId: task._id
+    });
+
+    res.status(201).json({
+        success: true,
+        message: 'Task created successfully',
+        task,
+    });
+});
 
 /**
  * @desc    Get tasks by project
  * @route   GET /api/tasks/project/:projectId
  * @access  Private (Manager - all project tasks, Employee - assigned tasks only)
  */
-export const getTasksByProject = async (req, res) => {
-    try {
-        const { projectId } = req.params;
+export const getTasksByProject = catchAsync(async (req, res, next) => {
+    const { projectId } = req.params;
 
-        // Verify project exists
-        const project = await Project.findById(projectId);
-        if (!project) {
-            return res.status(404).json({
-                success: false,
-                message: 'Project not found',
-            });
-        }
-
-        let tasks;
-
-        if (req.user.role === 'manager') {
-            // Manager can only see tasks from their own projects
-            if (project.createdBy.toString() !== req.user._id.toString()) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'Access denied. You can only view tasks from your own projects.',
-                });
-            }
-            tasks = await Task.find({ project: projectId })
-                .populate('assignedEmployee', 'name email designation')
-                .populate('project', 'projectName')
-                .populate('createdBy', 'name email')
-                .sort({ createdAt: -1 });
-        } else if (req.user.role === 'employee') {
-            // Employee can only see tasks assigned to them
-            const isAssigned = project.assignedEmployees.some(
-                emp => emp.toString() === req.user._id.toString()
-            );
-            if (!isAssigned) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'Access denied. You are not assigned to this project.',
-                });
-            }
-            tasks = await Task.find({ project: projectId, assignedEmployee: req.user._id })
-                .populate('assignedEmployee', 'name email designation')
-                .populate('project', 'projectName')
-                .populate('createdBy', 'name email')
-                .sort({ createdAt: -1 });
-        } else if (req.user.role === 'admin') {
-            // Admin can see all tasks in any project
-            tasks = await Task.find({ project: projectId })
-                .populate('assignedEmployee', 'name email designation')
-                .populate('project', 'projectName')
-                .populate('createdBy', 'name email')
-                .sort({ createdAt: -1 });
-        } else {
-            return res.status(403).json({
-                success: false,
-                message: 'Access denied.',
-            });
-        }
-
-        res.status(200).json({
-            success: true,
-            count: tasks.length,
-            tasks,
-        });
-    } catch (error) {
-        console.error('Get Tasks By Project Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error. Please try again later.',
-        });
+    // Verify project exists
+    const project = await Project.findById(projectId);
+    if (!project) {
+        return next(new AppError('Project not found', 404));
     }
-};
+
+    let tasks;
+
+    if (req.user.role === 'manager') {
+        // Manager can only see tasks from their own projects
+        if (project.createdBy.toString() !== req.user._id.toString()) {
+            return next(new AppError('Access denied. You can only view tasks from your own projects.', 403));
+        }
+        tasks = await Task.find({ project: projectId })
+            .populate('assignedEmployee', 'name email designation')
+            .populate('project', 'projectName')
+            .populate('createdBy', 'name email')
+            .sort({ createdAt: -1 });
+    } else if (req.user.role === 'employee') {
+        // Employee can only see tasks assigned to them
+        const isAssigned = project.assignedEmployees.some(
+            emp => emp.toString() === req.user._id.toString()
+        );
+        if (!isAssigned) {
+            return next(new AppError('Access denied. You are not assigned to this project.', 403));
+        }
+        tasks = await Task.find({ project: projectId, assignedEmployee: req.user._id })
+            .populate('assignedEmployee', 'name email designation')
+            .populate('project', 'projectName')
+            .populate('createdBy', 'name email')
+            .sort({ createdAt: -1 });
+    } else if (req.user.role === 'admin') {
+        // Admin can see all tasks in any project
+        tasks = await Task.find({ project: projectId })
+            .populate('assignedEmployee', 'name email designation')
+            .populate('project', 'projectName')
+            .populate('createdBy', 'name email')
+            .sort({ createdAt: -1 });
+    } else {
+        return next(new AppError('Access denied.', 403));
+    }
+
+    res.status(200).json({
+        success: true,
+        count: tasks.length,
+        tasks,
+    });
+});
 
 /**
  * @desc    Get single task by ID
  * @route   GET /api/tasks/:id
  * @access  Private (Manager/Employee with appropriate access)
  */
-export const getTaskById = async (req, res) => {
-    try {
-        const task = await Task.findById(req.params.id)
-            .populate('assignedEmployee', 'name email designation')
-            .populate('project', 'projectName createdBy assignedEmployees')
-            .populate('createdBy', 'name email');
+export const getTaskById = catchAsync(async (req, res, next) => {
+    const task = await Task.findById(req.params.id)
+        .populate('assignedEmployee', 'name email designation')
+        .populate('project', 'projectName createdBy assignedEmployees')
+        .populate('createdBy', 'name email');
 
-        if (!task) {
-            return res.status(404).json({
-                success: false,
-                message: 'Task not found',
-            });
-        }
-
-        // Role-based access check
-        if (req.user.role === 'admin') {
-            // Admin can view any task
-        } else if (req.user.role === 'manager') {
-            // Manager can only view tasks they created
-            if (task.createdBy._id.toString() !== req.user._id.toString()) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'Access denied. You can only view tasks you created.',
-                });
-            }
-        } else if (req.user.role === 'employee') {
-            // Employee can only view tasks assigned to them
-            if (task.assignedEmployee._id.toString() !== req.user._id.toString()) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'Access denied. You can only view tasks assigned to you.',
-                });
-            }
-        } else {
-            return res.status(403).json({
-                success: false,
-                message: 'Access denied.',
-            });
-        }
-
-        res.status(200).json({
-            success: true,
-            task,
-        });
-    } catch (error) {
-        console.error('Get Task Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error. Please try again later.',
-        });
+    if (!task) {
+        return next(new AppError('Task not found', 404));
     }
-};
+
+    // Role-based access check
+    if (req.user.role === 'admin') {
+        // Admin can view any task
+    } else if (req.user.role === 'manager') {
+        // Manager can only view tasks they created
+        if (task.createdBy._id.toString() !== req.user._id.toString()) {
+            return next(new AppError('Access denied. You can only view tasks you created.', 403));
+        }
+    } else if (req.user.role === 'employee') {
+        // Employee can only view tasks assigned to them
+        if (task.assignedEmployee._id.toString() !== req.user._id.toString()) {
+            return next(new AppError('Access denied. You can only view tasks assigned to you.', 403));
+        }
+    } else {
+        return next(new AppError('Access denied.', 403));
+    }
+
+    res.status(200).json({
+        success: true,
+        task,
+    });
+});
 
 /**
  * @desc    Update task

@@ -39,15 +39,15 @@ router.get('/:id', protectAny, getProjectById);
 /**
  * @route   PUT /api/projects/:id
  * @desc    Update project
- * @access  Private (Manager only - own projects)
+ * @access  Private (Admin - all projects, Manager - own projects)
  */
-router.put('/:id', protectManager, updateProject);
+router.put('/:id', protectAny, updateProject);
 
 /**
  * @route   DELETE /api/projects/:id
  * @desc    Delete project
- * @access  Private (Manager only - own projects)
+ * @access  Private (Admin - all projects, Manager - own projects)
  */
-router.delete('/:id', protectManager, deleteProject);
+router.delete('/:id', protectAny, deleteProject);
 
 export default router;

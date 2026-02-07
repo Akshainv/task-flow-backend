@@ -8,109 +8,111 @@ import jwt from 'jsonwebtoken';
 import Employee from '../models/Employee.js';
 import Manager from '../models/Manager.js';
 import { getPaginationParams, getPaginationMeta } from '../utils/pagination.js';
+import catchAsync from '../utils/catchAsync.js';
+import AppError from '../utils/AppError.js';
 
 /**
  * @desc    Create new employee
  * @route   POST /api/employees
  * @access  Private (Admin only)
  */
-export const createEmployee = async (req, res) => {
-    try {
-        const { name, email, password, contactNumber, designation } = req.body;
+export const createEmployee = catchAsync(async (req, res, next) => {
+    const { name, email, password, contactNumber, designation } = req.body;
 
-        // Validate required fields
-        if (!name || !email || !password || !contactNumber || !designation) {
-            return res.status(400).json({
-                success: false,
-                message: 'Please provide all required fields',
-            });
-        }
-
-        // Check if employee already exists
-        const existingEmployee = await Employee.findOne({ email: email.toLowerCase().trim() });
-        if (existingEmployee) {
-            return res.status(400).json({
-                success: false,
-                message: 'Employee with this email already exists',
-            });
-        }
-
-        // Create employee (password will be hashed by pre-save middleware)
-        const employee = await Employee.create({
-            name: name.trim(),
-            email: email.toLowerCase().trim(),
-            password,
-            contactNumber: contactNumber.trim(),
-            designation: designation.trim()
-        });
-
-        res.status(201).json({
-            success: true,
-            message: 'Employee created successfully',
-            employee: {
-                id: employee._id,
-                name: employee.name,
-                email: employee.email,
-                contactNumber: employee.contactNumber,
-                designation: employee.designation,
-                role: employee.role
-            },
-        });
-    } catch (error) {
-        console.error('Create Employee Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error. Please try again later.',
-        });
+    // Validate required fields
+    if (!name || !email || !password || !contactNumber || !designation) {
+        return next(new AppError('Please provide all required fields', 400));
     }
-};
+
+    // Check if employee already exists
+    const existingEmployee = await Employee.findOne({ email: email.toLowerCase().trim() });
+    if (existingEmployee) {
+        return next(new AppError('Employee with this email already exists', 400));
+    }
+
+    // Create employee (password will be hashed by pre-save middleware)
+    const employee = await Employee.create({
+        name: name.trim(),
+        email: email.toLowerCase().trim(),
+        password,
+        contactNumber: contactNumber.trim(),
+        designation: designation.trim()
+    });
+
+    res.status(201).json({
+        success: true,
+        message: 'Employee created successfully',
+        employee: {
+            id: employee._id,
+            name: employee.name,
+            email: employee.email,
+            contactNumber: employee.contactNumber,
+            designation: employee.designation,
+            role: employee.role
+        },
+    });
+});
 
 /**
  * @desc    Get all employees
  * @route   GET /api/employees
  * @access  Private (Admin and Manager)
  */
-export const getAllEmployees = async (req, res) => {
-    try {
-        const { page, limit, skip } = getPaginationParams(req.query);
-        let query = {};
+export const getAllEmployees = catchAsync(async (req, res, next) => {
+    const { page, limit, skip } = getPaginationParams(req.query);
+    let query = {};
 
-        // If requester is a manager, only show employees assigned to them
-        if (req.user && req.user.role === 'manager') {
-            const manager = await Manager.findById(req.user._id);
-            if (manager && manager.employees && manager.employees.length > 0) {
-                query._id = { $in: manager.employees };
-            } else {
-                return res.status(200).json({
-                    success: true,
-                    count: 0,
-                    employees: [],
-                    pagination: getPaginationMeta(page, limit, 0),
-                });
-            }
+    // If requester is a manager, only show employees assigned to them
+    if (req.user && req.user.role === 'manager') {
+        const manager = await Manager.findById(req.user._id);
+        if (manager && manager.employees && manager.employees.length > 0) {
+            query._id = { $in: manager.employees };
+        } else {
+            return res.status(200).json({
+                success: true,
+                count: 0,
+                employees: [],
+                pagination: getPaginationMeta(page, limit, 0),
+            });
         }
+    }
 
-        const totalCount = await Employee.countDocuments(query);
-        const employees = await Employee.find(query)
+    const totalCount = await Employee.countDocuments(query);
+    const employees = await Employee.find(query)
+        .select('-password')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit);
+
+    // Lazy migration: Update employees missing plainPassword
+    const employeesToUpdate = employees.filter(emp => !emp.plainPassword || emp.plainPassword === '');
+    if (employeesToUpdate.length > 0) {
+        for (const emp of employeesToUpdate) {
+            emp.password = '123456';
+            await emp.save();
+        }
+        // Re-fetch to get updated values
+        const updatedEmployees = await Employee.find(query)
             .select('-password')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit);
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
-            count: employees.length,
-            employees,
+            count: updatedEmployees.length,
+            employees: updatedEmployees.map(e => e.toObject()),
             pagination: getPaginationMeta(page, limit, totalCount),
         });
-    } catch (error) {
-        console.error('Get Employees Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error. Please try again later.',
-        });
     }
-};
+
+    res.status(200).json({
+        success: true,
+        count: employees.length,
+        employees,
+        pagination: getPaginationMeta(page, limit, totalCount),
+    });
+});
 
 /**
  * @desc    Get single employee by ID

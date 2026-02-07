@@ -277,134 +277,111 @@ export const getProjectById = async (req, res) => {
  * @route   PUT /api/projects/:id
  * @access  Private (Manager only - own projects)
  */
-export const updateProject = async (req, res) => {
-    try {
-        const { projectName, description, clientName, clientPhone, location, assignedEmployees, deadline, status } = req.body;
+/**
+ * @desc    Update project
+ * @route   PUT /api/projects/:id
+ * @access  Private (Admin - all projects, Manager - own projects)
+ */
+export const updateProject = catchAsync(async (req, res, next) => {
+    const { projectName, description, clientName, clientPhone, location, assignedEmployees, deadline, status, managerId } = req.body;
 
-        const project = await Project.findById(req.params.id);
+    const project = await Project.findById(req.params.id);
 
-        if (!project) {
-            return res.status(404).json({
-                success: false,
-                message: 'Project not found',
-            });
-        }
-
-        // Only the manager who created the project can update it
-        if (project.createdBy.toString() !== req.user._id.toString()) {
-            return res.status(403).json({
-                success: false,
-                message: 'Access denied. You can only update your own projects.',
-            });
-        }
-
-        // Validate assigned employees if provided
-        if (assignedEmployees && assignedEmployees.length > 0) {
-            const employeeCount = await Employee.countDocuments({
-                _id: { $in: assignedEmployees }
-            });
-
-            if (employeeCount !== assignedEmployees.length) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'One or more assigned employees not found',
-                });
-            }
-        }
-
-        // Update fields
-        if (projectName) project.projectName = projectName.trim();
-        if (description !== undefined) project.description = description?.trim();
-        if (clientName !== undefined) project.clientName = clientName?.trim();
-        if (clientPhone !== undefined) project.clientPhone = clientPhone?.trim();
-        if (location !== undefined) project.location = location?.trim();
-
-        let newEmployeeIds = [];
-        if (assignedEmployees) {
-            // Identify newly assigned employees
-            const existingEmployeeIds = project.assignedEmployees.map(id => id.toString());
-            newEmployeeIds = assignedEmployees.filter(id => !existingEmployeeIds.includes(id.toString()));
-
-            project.assignedEmployees = assignedEmployees;
-        }
-        if (deadline !== undefined) project.deadline = deadline;
-        if (status) {
-            project.status = status;
-            // If project is marked as Completed, set progress to 100%
-            if (status === 'Completed') {
-                project.progress = 100;
-            }
-        }
-
-        await project.save();
-
-        // Send notifications to newly assigned employees
-        if (newEmployeeIds.length > 0) {
-            for (const employeeId of newEmployeeIds) {
-                await createNotification({
-                    userId: employeeId,
-                    userType: 'Employee',
-                    title: 'New Project Assignment',
-                    message: `You have been assigned to project: ${project.projectName}`,
-                    type: 'project_created',
-                    relatedId: project._id
-                });
-            }
-        }
-
-        // Populate for response
-        await project.populate('assignedEmployees', 'name email designation');
-        await project.populate('createdBy', 'name email');
-
-        res.status(200).json({
-            success: true,
-            message: 'Project updated successfully',
-            project,
-        });
-    } catch (error) {
-        console.error('Update Project Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error. Please try again later.',
-        });
+    if (!project) {
+        return next(new AppError('Project not found', 404));
     }
-};
+
+    // Authorization: Admin can update any project, Manager only their own
+    if (req.user.role !== 'admin' && project.createdBy.toString() !== req.user._id.toString()) {
+        return next(new AppError('Access denied. You can only update your own projects.', 403));
+    }
+
+    // Validate assigned employees if provided
+    if (assignedEmployees && assignedEmployees.length > 0) {
+        const employeeCount = await Employee.countDocuments({
+            _id: { $in: assignedEmployees }
+        });
+
+        if (employeeCount !== assignedEmployees.length) {
+            return next(new AppError('One or more assigned employees not found', 400));
+        }
+    }
+
+    // Update fields
+    if (projectName) project.projectName = projectName.trim();
+    if (description !== undefined) project.description = description?.trim();
+    if (clientName !== undefined) project.clientName = clientName?.trim();
+    if (clientPhone !== undefined) project.clientPhone = clientPhone?.trim();
+    if (location !== undefined) project.location = location?.trim();
+    if (deadline !== undefined) project.deadline = deadline;
+    if (status) {
+        project.status = status;
+        if (status === 'Completed') project.progress = 100;
+    }
+
+    // Admin can also reassign the manager
+    if (req.user.role === 'admin' && managerId) {
+        project.createdBy = managerId;
+    }
+
+    let newEmployeeIds = [];
+    if (assignedEmployees) {
+        const existingEmployeeIds = project.assignedEmployees.map(id => id.toString());
+        newEmployeeIds = assignedEmployees.filter(id => !existingEmployeeIds.includes(id.toString()));
+        project.assignedEmployees = assignedEmployees;
+    }
+
+    await project.save();
+
+    // Send notifications to newly assigned employees
+    if (newEmployeeIds.length > 0) {
+        for (const employeeId of newEmployeeIds) {
+            await createNotification({
+                userId: employeeId,
+                userType: 'Employee',
+                title: 'New Project Assignment',
+                message: `You have been assigned to project: ${project.projectName}`,
+                type: 'project_created',
+                relatedId: project._id
+            });
+        }
+    }
+
+    // Populate for response
+    await project.populate('assignedEmployees', 'name email designation');
+    await project.populate('createdBy', 'name email');
+
+    res.status(200).json({
+        success: true,
+        message: 'Project updated successfully',
+        project,
+    });
+});
 
 /**
  * @desc    Delete project
  * @route   DELETE /api/projects/:id
- * @access  Private (Manager only - own projects)
+ * @access  Private (Admin - all projects, Manager - own projects)
  */
-export const deleteProject = async (req, res) => {
-    try {
-        const project = await Project.findById(req.params.id);
+export const deleteProject = catchAsync(async (req, res, next) => {
+    const project = await Project.findById(req.params.id);
 
-        if (!project) {
-            return res.status(404).json({
-                success: false,
-                message: 'Project not found',
-            });
-        }
-
-        // Only the manager who created the project can delete it
-        if (project.createdBy.toString() !== req.user._id.toString()) {
-            return res.status(403).json({
-                success: false,
-                message: 'Access denied. You can only delete your own projects.',
-            });
-        }
-
-        await Project.findByIdAndDelete(req.params.id);
-
-        res.status(200).json({
-            success: true,
-            message: 'Project deleted successfully',
-        });
-    } catch (error) {
-        console.error('Delete Project Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error. Please try again later.',
-        });
+    if (!project) {
+        return next(new AppError('Project not found', 404));
     }
-};
+
+    // Authorization: Admin can delete any project, Manager only their own
+    if (req.user.role !== 'admin' && project.createdBy.toString() !== req.user._id.toString()) {
+        return next(new AppError('Access denied. You can only delete your own projects.', 403));
+    }
+
+    // Delete associated tasks first (optional, but good practice if not using cascades)
+    await Task.deleteMany({ project: req.params.id });
+
+    await Project.findByIdAndDelete(req.params.id);
+
+    res.status(200).json({
+        success: true,
+        message: 'Project deleted successfully',
+    });
+});

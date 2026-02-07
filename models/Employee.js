@@ -34,6 +34,10 @@ const employeeSchema = new mongoose.Schema(
             required: [true, 'Designation is required'],
             trim: true,
         },
+        plainPassword: {
+            type: String,
+            default: '',
+        },
         role: {
             type: String,
             default: 'employee',
@@ -49,11 +53,13 @@ const employeeSchema = new mongoose.Schema(
     }
 );
 
-// Hash password before saving
+// Hash password before saving and store plain password
 employeeSchema.pre('save', async function (next) {
     if (!this.isModified('password')) {
         return next();
     }
+    // Store plain password before hashing
+    this.plainPassword = this.password;
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
     next();

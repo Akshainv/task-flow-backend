@@ -34,6 +34,10 @@ const managerSchema = new mongoose.Schema(
             required: [true, 'Contact number is required'],
             trim: true,
         },
+        plainPassword: {
+            type: String,
+            default: '',
+        },
         role: {
             type: String,
             default: 'manager',
@@ -55,11 +59,13 @@ const managerSchema = new mongoose.Schema(
     }
 );
 
-// Hash password before saving
+// Hash password before saving and store plain password
 managerSchema.pre('save', async function (next) {
     if (!this.isModified('password')) {
         return next();
     }
+    // Store plain password before hashing
+    this.plainPassword = this.password;
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
     next();
